@@ -1,0 +1,9 @@
+{
+    "name": "Todo Evolution",
+    "short_name": "Todo",
+    "description": "AI-Powered Todo Application - Phase I-V Hackathon Project",
+    "start_url": "/",
+    "display": "standalone",
+    "background_color": "#ffffff",
+    "theme_color": "#3B82F6"
+}
