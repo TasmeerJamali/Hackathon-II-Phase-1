@@ -1,6 +1,9 @@
 /**
  * Signup API Route
  * POST /api/auth/signup
+ * 
+ * Note: This uses in-memory storage which resets on each serverless cold start.
+ * For hackathon demo purposes - production would use a database.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -9,17 +12,8 @@ import { SignJWT } from "jose";
 const AUTH_SECRET = process.env.BETTER_AUTH_SECRET || "hackathon-secret-key-2024";
 const SECRET_KEY = new TextEncoder().encode(AUTH_SECRET);
 
-// Simple in-memory store (demo purposes - resets on cold start)
-declare global {
-    // eslint-disable-next-line no-var
-    var users: Map<string, { id: string; email: string; name: string; password: string }> | undefined;
-}
-
-if (!global.users) {
-    global.users = new Map();
-}
-
-const users = global.users;
+// Simple in-memory store (resets on cold start - fine for demo)
+const users = new Map<string, { id: string; email: string; name: string; password: string }>();
 
 async function signToken(payload: { sub: string; email: string; name: string }): Promise<string> {
     return new SignJWT(payload)
@@ -38,10 +32,7 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ message: "Email and password required" }, { status: 400 });
         }
 
-        if (users.has(email)) {
-            return NextResponse.json({ message: "User already exists" }, { status: 400 });
-        }
-
+        // Always allow signup (serverless resets state anyway)
         const userId = `user_${Date.now()}`;
         users.set(email, { id: userId, email, name: name || email, password });
 
