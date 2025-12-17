@@ -33,11 +33,22 @@ export default function LoginPage() {
                 body: JSON.stringify({ email, password }),
             });
 
-            if (!response.ok) {
-                throw new Error("Invalid credentials");
+            // Parse response safely
+            let data;
+            const contentType = response.headers.get("content-type");
+            if (contentType && contentType.includes("application/json")) {
+                data = await response.json();
+            } else {
+                const text = await response.text();
+                if (!response.ok) {
+                    throw new Error(text || "Invalid credentials");
+                }
+                data = { token: "", user: { id: "" } };
             }
 
-            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data.message || data.error || "Invalid credentials");
+            }
 
             // Store token for API calls
             localStorage.setItem("auth_token", data.token);

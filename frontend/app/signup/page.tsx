@@ -40,9 +40,18 @@ export default function SignupPage() {
                 body: JSON.stringify({ name, email, password }),
             });
 
+            // Try to parse JSON, handle cases where response might not be JSON
+            let data;
+            const contentType = response.headers.get("content-type");
+            if (contentType && contentType.includes("application/json")) {
+                data = await response.json();
+            } else {
+                const text = await response.text();
+                data = { message: text || "Unknown error" };
+            }
+
             if (!response.ok) {
-                const data = await response.json();
-                throw new Error(data.message || "Signup failed");
+                throw new Error(data.message || data.error || "Signup failed");
             }
 
             router.push("/login");
