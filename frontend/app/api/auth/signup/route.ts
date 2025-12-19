@@ -1,19 +1,19 @@
 /**
- * Signup API Route
+ * Signup API Route - With JWT
  * POST /api/auth/signup
  * 
- * Note: This uses in-memory storage which resets on each serverless cold start.
- * For hackathon demo purposes - production would use a database.
+ * Generates proper JWT tokens for AKS backend authentication
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { SignJWT } from "jose";
 
+// Explicitly use Node.js runtime
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
 const AUTH_SECRET = process.env.BETTER_AUTH_SECRET || "hackathon-secret-key-2024";
 const SECRET_KEY = new TextEncoder().encode(AUTH_SECRET);
-
-// Simple in-memory store (resets on cold start - fine for demo)
-const users = new Map<string, { id: string; email: string; name: string; password: string }>();
 
 async function signToken(payload: { sub: string; email: string; name: string }): Promise<string> {
     return new SignJWT(payload)
@@ -24,32 +24,43 @@ async function signToken(payload: { sub: string; email: string; name: string }):
 }
 
 export async function POST(request: NextRequest) {
+    console.log("Signup route called");
+
     try {
         const body = await request.json();
+        console.log("Request body:", JSON.stringify(body));
+
         const { email, password, name } = body;
 
         if (!email || !password) {
             return NextResponse.json({ message: "Email and password required" }, { status: 400 });
         }
 
-        // Always allow signup (serverless resets state anyway)
         const userId = `user_${Date.now()}`;
-        users.set(email, { id: userId, email, name: name || email, password });
+        const userName = name || email.split("@")[0];
 
-        const token = await signToken({ sub: userId, email, name: name || email });
+        // Generate proper JWT token
+        const token = await signToken({
+            sub: userId,
+            email,
+            name: userName,
+        });
 
         const response = NextResponse.json({
-            user: { id: userId, email, name: name || email },
+            user: { id: userId, email, name: userName },
             token,
+            message: "Account created successfully",
         });
 
+        // Also set as cookie for SSR
         response.cookies.set("auth_token", token, {
             httpOnly: true,
-            secure: process.env.NODE_ENV === "production",
+            secure: true,
             sameSite: "lax",
-            maxAge: 60 * 60 * 24 * 7,
+            maxAge: 60 * 60 * 24 * 7, // 7 days
         });
 
+        console.log("Signup successful for:", email);
         return response;
     } catch (error) {
         console.error("Signup error:", error);

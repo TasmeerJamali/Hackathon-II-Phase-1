@@ -23,7 +23,7 @@ from src.models import (
     Priority,
     Task,
     TaskCreate,
-    TaskReadWithTags,
+    TaskRead,
     TaskUpdate,
 )
 
@@ -32,7 +32,7 @@ router = APIRouter(prefix="/api/{user_id}", tags=["Tasks"])
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
 
-@router.get("/tasks", response_model=list[TaskReadWithTags])
+@router.get("/tasks", response_model=list[TaskRead])
 async def list_tasks(
     user_id: str,
     session: SessionDep,
@@ -64,7 +64,7 @@ async def list_tasks(
     )
 
 
-@router.post("/tasks", response_model=TaskReadWithTags, status_code=status.HTTP_201_CREATED)
+@router.post("/tasks", response_model=TaskRead, status_code=status.HTTP_201_CREATED)
 async def create_task(
     user_id: str,
     session: SessionDep,
@@ -93,7 +93,7 @@ async def create_task(
     return task
 
 
-@router.get("/tasks/{task_id}", response_model=TaskReadWithTags)
+@router.get("/tasks/{task_id}", response_model=TaskRead)
 async def get_task(
     user_id: str,
     task_id: int,
@@ -107,7 +107,7 @@ async def get_task(
     return task
 
 
-@router.put("/tasks/{task_id}", response_model=TaskReadWithTags)
+@router.put("/tasks/{task_id}", response_model=TaskRead)
 async def update_task(
     user_id: str,
     task_id: int,
@@ -174,7 +174,7 @@ async def delete_task(
         )
 
 
-@router.patch("/tasks/{task_id}/complete", response_model=TaskReadWithTags)
+@router.patch("/tasks/{task_id}/complete", response_model=TaskRead)
 async def toggle_task_complete(
     user_id: str,
     task_id: int,

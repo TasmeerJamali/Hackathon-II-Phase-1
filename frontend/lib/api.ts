@@ -60,7 +60,6 @@ class ApiClient {
 
         const headers: HeadersInit = {
             "Content-Type": "application/json",
-            ...options.headers,
         };
 
         // CRITICAL: Add Authorization Bearer header to EVERY request
@@ -68,14 +67,20 @@ class ApiClient {
             (headers as Record<string, string>)["Authorization"] = `Bearer ${token}`;
         }
 
-        const response = await fetch(`${API_URL}${endpoint}`, {
-            ...options,
+        // Use proxy to avoid Mixed Content (HTTPS frontend -> HTTP backend)
+        const response = await fetch("/api/proxy", {
+            method: "POST",
             headers,
+            body: JSON.stringify({
+                endpoint,
+                method: options.method || "GET",
+                body: options.body ? JSON.parse(options.body as string) : undefined,
+            }),
         });
 
         if (!response.ok) {
             const error = await response.json().catch(() => ({}));
-            throw new Error(error.detail || `HTTP ${response.status}`);
+            throw new Error(error.detail || error.error || `HTTP ${response.status}`);
         }
 
         // Handle 204 No Content
