@@ -142,7 +142,7 @@ class TodoAgent:
         # Configure Gemini
         genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
         self.model = genai.GenerativeModel(
-            model_name="gemini-1.5-flash",
+            model_name="gemini-2.0-flash",
             system_instruction=SYSTEM_PROMPT,
             tools=GEMINI_TOOLS,
         )
