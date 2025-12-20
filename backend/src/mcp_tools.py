@@ -184,9 +184,10 @@ class MCPToolExecutor:
 
     async def complete_task(
         self,
-        task_id: int,
+        task_id: int | str,
     ) -> dict[str, Any]:
         """Mark task as complete."""
+        task_id = int(task_id)  # Ensure int (LLM may pass string)
         result = await self.session.execute(
             select(Task).where(Task.id == task_id, Task.user_id == self.user_id)
         )
@@ -207,9 +208,10 @@ class MCPToolExecutor:
 
     async def delete_task(
         self,
-        task_id: int,
+        task_id: int | str,
     ) -> dict[str, Any]:
         """Delete a task."""
+        task_id = int(task_id)  # Ensure int (LLM may pass string)
         result = await self.session.execute(
             select(Task).where(Task.id == task_id, Task.user_id == self.user_id)
         )
@@ -230,11 +232,12 @@ class MCPToolExecutor:
 
     async def update_task(
         self,
-        task_id: int,
+        task_id: int | str,
         title: str | None = None,
         description: str | None = None,
     ) -> dict[str, Any]:
         """Update a task."""
+        task_id = int(task_id)  # Ensure int (LLM may pass string)
         result = await self.session.execute(
             select(Task).where(Task.id == task_id, Task.user_id == self.user_id)
         )

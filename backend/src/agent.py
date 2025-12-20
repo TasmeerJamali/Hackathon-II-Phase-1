@@ -1,20 +1,14 @@
-"""Gemini Agent for Todo Chatbot.
+"""Groq Agent for Todo Chatbot.
 
 Reference: @specs/features/chatbot.md
-- AC-CHAT-001.1: "Add task to X" → calls add_task tool
-- AC-CHAT-001.2: "Show my tasks" → calls list_tasks(status="all")
-- AC-CHAT-001.3: "What's pending?" → calls list_tasks(status="pending")
-- AC-CHAT-001.4: "Mark task X as done" → calls complete_task
-- AC-CHAT-001.5: "Delete task X" → calls delete_task
-
-Uses Google Gemini API instead of OpenAI for more generous free tier.
+Uses Groq API with Llama model - generous free tier (14,000 tokens/min).
 """
 
 import json
 import os
 from typing import Any
 
-import google.generativeai as genai
+import httpx
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from src.mcp_tools import MCPToolExecutor
@@ -22,200 +16,110 @@ from src.mcp_tools import MCPToolExecutor
 # System prompt for the AI agent
 SYSTEM_PROMPT = """You are a helpful Todo assistant. You help users manage their tasks through natural language.
 
-Available commands you can understand:
-- "Add a task to buy groceries" → Create a new task
-- "Show my tasks" or "List all tasks" → Show all tasks
-- "What's pending?" or "Show incomplete tasks" → Show only pending tasks
-- "Mark task 3 as done" or "Complete task 3" → Mark a task as complete
-- "Delete task 5" or "Remove task 5" → Delete a task
-- "Update task 2 to buy milk" → Update a task title
+You have access to these tools:
+- add_task: Create a new task (requires title, optional description)
+- list_tasks: List tasks (optional status filter: all, pending, completed)
+- complete_task: Mark a task as complete (requires task_id)
+- delete_task: Delete a task (requires task_id)  
+- update_task: Update a task (requires task_id, optional title/description)
 
-When the user asks "What's pending?" you MUST call list_tasks with status="pending".
-When the user says "show my tasks" you MUST call list_tasks with status="all".
+When the user asks "What's pending?" call list_tasks with status="pending".
+When the user says "show my tasks" call list_tasks with status="all".
 
-Always be friendly and confirm actions with the user.
+IMPORTANT: When calling a tool, respond ONLY with a JSON object in this exact format:
+{"tool": "tool_name", "args": {"arg1": "value1"}}
+
+If no tool is needed, respond normally with text.
 Format task lists nicely with checkboxes: ✅ for complete, ❌ for pending.
 """
 
-# Gemini tool definitions (different format from OpenAI)
-GEMINI_TOOLS = [
-    genai.protos.Tool(
-        function_declarations=[
-            genai.protos.FunctionDeclaration(
-                name="add_task",
-                description="Create a new task in the todo list",
-                parameters=genai.protos.Schema(
-                    type=genai.protos.Type.OBJECT,
-                    properties={
-                        "title": genai.protos.Schema(
-                            type=genai.protos.Type.STRING,
-                            description="Task title (required)"
-                        ),
-                        "description": genai.protos.Schema(
-                            type=genai.protos.Type.STRING,
-                            description="Task description (optional)"
-                        ),
-                    },
-                    required=["title"],
-                ),
-            ),
-            genai.protos.FunctionDeclaration(
-                name="list_tasks",
-                description="List all tasks or filter by status (all, pending, completed)",
-                parameters=genai.protos.Schema(
-                    type=genai.protos.Type.OBJECT,
-                    properties={
-                        "status": genai.protos.Schema(
-                            type=genai.protos.Type.STRING,
-                            description="Filter by status: all, pending, or completed",
-                            enum=["all", "pending", "completed"],
-                        ),
-                    },
-                ),
-            ),
-            genai.protos.FunctionDeclaration(
-                name="complete_task",
-                description="Mark a task as complete",
-                parameters=genai.protos.Schema(
-                    type=genai.protos.Type.OBJECT,
-                    properties={
-                        "task_id": genai.protos.Schema(
-                            type=genai.protos.Type.INTEGER,
-                            description="ID of the task to complete"
-                        ),
-                    },
-                    required=["task_id"],
-                ),
-            ),
-            genai.protos.FunctionDeclaration(
-                name="delete_task",
-                description="Delete a task from the list",
-                parameters=genai.protos.Schema(
-                    type=genai.protos.Type.OBJECT,
-                    properties={
-                        "task_id": genai.protos.Schema(
-                            type=genai.protos.Type.INTEGER,
-                            description="ID of the task to delete"
-                        ),
-                    },
-                    required=["task_id"],
-                ),
-            ),
-            genai.protos.FunctionDeclaration(
-                name="update_task",
-                description="Update a task's title or description",
-                parameters=genai.protos.Schema(
-                    type=genai.protos.Type.OBJECT,
-                    properties={
-                        "task_id": genai.protos.Schema(
-                            type=genai.protos.Type.INTEGER,
-                            description="ID of the task to update"
-                        ),
-                        "title": genai.protos.Schema(
-                            type=genai.protos.Type.STRING,
-                            description="New title (optional)"
-                        ),
-                        "description": genai.protos.Schema(
-                            type=genai.protos.Type.STRING,
-                            description="New description (optional)"
-                        ),
-                    },
-                    required=["task_id"],
-                ),
-            ),
-        ]
-    )
-]
-
 
 class TodoAgent:
-    """Gemini-powered Todo Agent with function calling.
-    
-    Uses the tools defined for Gemini function calling format.
-    """
+    """Groq-powered Todo Agent using Llama model."""
 
     def __init__(self, session: AsyncSession, user_id: str):
         self.session = session
         self.user_id = user_id
         self.tool_executor = MCPToolExecutor(session, user_id)
-        
-        # Configure Gemini
-        genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-        self.model = genai.GenerativeModel(
-            model_name="gemini-1.5-flash",
-            system_instruction=SYSTEM_PROMPT,
-            tools=GEMINI_TOOLS,
-        )
+        self.api_key = os.getenv("GROQ_API_KEY")
+        self.api_url = "https://api.groq.com/openai/v1/chat/completions"
 
     async def chat(
         self,
         user_message: str,
         history: list[dict[str, str]],
     ) -> tuple[str, list[str]]:
-        """
-        Process a chat message and return response with tool calls.
-        
-        Per AC-CHAT-002.1: Server holds NO state between requests.
-        History is passed in from the database.
-        
-        Returns: (response_text, list_of_tool_names_called)
-        """
+        """Process a chat message and return response with tool calls."""
         tool_calls_made: list[str] = []
         
-        # Convert history to Gemini format
-        gemini_history = []
-        for msg in history:
-            role = "user" if msg["role"] == "user" else "model"
-            gemini_history.append({
-                "role": role,
-                "parts": [msg["content"]]
-            })
+        # Build messages array
+        messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+        messages.extend(history)
+        messages.append({"role": "user", "content": user_message})
         
-        # Create chat session with history
-        chat = self.model.start_chat(history=gemini_history)
-        
-        # Send message and process response
-        response = chat.send_message(user_message)
-        
-        # Check for function calls
-        while response.candidates[0].content.parts:
-            part = response.candidates[0].content.parts[0]
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            # Make request to Groq
+            response = await client.post(
+                self.api_url,
+                json={
+                    "model": "llama-3.3-70b-versatile",
+                    "messages": messages,
+                    "temperature": 0.7,
+                    "max_tokens": 1024,
+                },
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json"
+                }
+            )
             
-            if hasattr(part, 'function_call') and part.function_call.name:
-                # Extract function call
-                function_call = part.function_call
-                tool_name = function_call.name
-                tool_calls_made.append(tool_name)
-                
-                # Parse arguments
-                arguments = {}
-                for key, value in function_call.args.items():
-                    arguments[key] = value
-                
-                # Execute the tool
-                result = await self.tool_executor.execute_tool(tool_name, arguments)
-                
-                # Send function result back to Gemini
-                response = chat.send_message(
-                    genai.protos.Content(
-                        parts=[
-                            genai.protos.Part(
-                                function_response=genai.protos.FunctionResponse(
-                                    name=tool_name,
-                                    response={"result": result}
-                                )
-                            )
-                        ]
-                    )
-                )
-            else:
-                # No more function calls, we have the final text response
-                break
-        
-        # Get final text response
-        response_text = ""
-        for part in response.candidates[0].content.parts:
-            if hasattr(part, 'text'):
-                response_text += part.text
-        
-        return response_text, tool_calls_made
+            if response.status_code != 200:
+                error_text = response.text
+                print(f"Groq API error: {response.status_code} - {error_text}")
+                return f"Sorry, I encountered an error: {error_text[:200]}", []
+            
+            result = response.json()
+            assistant_message = result["choices"][0]["message"]["content"]
+            
+            # Check if the response is a tool call (JSON format)
+            try:
+                # Try to parse as JSON tool call
+                if assistant_message.strip().startswith("{"):
+                    tool_data = json.loads(assistant_message)
+                    if "tool" in tool_data:
+                        tool_name = tool_data["tool"]
+                        arguments = tool_data.get("args", {})
+                        tool_calls_made.append(tool_name)
+                        
+                        # Execute the tool
+                        tool_result = await self.tool_executor.execute_tool(tool_name, arguments)
+                        
+                        # Add tool result to messages and get final response
+                        messages.append({"role": "assistant", "content": assistant_message})
+                        messages.append({
+                            "role": "user", 
+                            "content": f"Tool result: {json.dumps(tool_result)}\n\nPlease provide a friendly response to the user based on this result."
+                        })
+                        
+                        # Get final response
+                        response = await client.post(
+                            self.api_url,
+                            json={
+                                "model": "llama-3.3-70b-versatile",
+                                "messages": messages,
+                                "temperature": 0.7,
+                                "max_tokens": 1024,
+                            },
+                            headers={
+                                "Authorization": f"Bearer {self.api_key}",
+                                "Content-Type": "application/json"
+                            }
+                        )
+                        
+                        if response.status_code == 200:
+                            result = response.json()
+                            return result["choices"][0]["message"]["content"], tool_calls_made
+            except json.JSONDecodeError:
+                pass
+            
+            return assistant_message, tool_calls_made
